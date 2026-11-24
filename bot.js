@@ -47,12 +47,23 @@ wowheadCommand.addStringOption(option => option.setName('edition')
 opt(wowheadCommand, 'query', 'What to look up');
 
 const armoryRegions = { us: 'North America', eu: 'Europe', kr: 'Korea', tw: 'Taiwan' };
+const armoryEditions = { retail: 'Retail', classic: 'Classic', era: 'Classic Era', forever: 'Forever' };
 const armoryCommand = new SlashCommandBuilder().setName('armory')
-  .setDescription('Look up a Retail WoW character on the Blizzard Armory')
-  .addStringOption(option => option.setName('region').setDescription('Character region').setRequired(true)
-    .addChoices(Object.entries(armoryRegions).map(([value, name]) => ({ name, value }))));
-opt(armoryCommand, 'realm', 'Realm name or Armory realm slug');
-opt(armoryCommand, 'character', 'Character name', 32);
+  .setDescription('Look up a WoW character in Blizzard’s profile data');
+for (const [edition, label] of Object.entries(armoryEditions)) {
+  armoryCommand.addSubcommand(command => {
+    command.setName(edition).setDescription('Look up a ' + label + ' character')
+      .addStringOption(option => option.setName('region').setDescription('Character region').setRequired(true)
+        .addChoices(Object.entries(armoryRegions).map(([value, name]) => ({ name, value }))));
+    if (edition !== 'forever') {
+      command.addStringOption(option => option.setName('realm').setDescription('Search and select a realm')
+        .setRequired(true).setAutocomplete(true).setMaxLength(100));
+    }
+    opt(command, 'character', edition === 'forever' ? 'Character first name' : 'Character name', 32);
+    if (edition === 'forever') opt(command, 'surname', 'Character surname', 32);
+    return command;
+  });
+}
 
 const commands = [
   armoryCommand,
@@ -153,34 +164,69 @@ async function handleWowhead(interaction) {
   collector.on('end', () => { void interaction.editReply(card(true)).catch(() => {}); });
 }
 
+const hasBlizzardCredentials = () => Boolean(config.blizzard?.clientId && config.blizzard?.clientSecret);
+
+async function suggestArmoryRealms(interaction) {
+  const region = interaction.options.getString('region');
+  const edition = interaction.options.getSubcommand();
+  if (!hasBlizzardCredentials() || !Object.hasOwn(armoryRegions, region) ||
+      !Object.hasOwn(armoryEditions, edition) || edition === 'forever') return interaction.respond([]);
+
+  let timer;
+  try {
+    const options = await Promise.race([
+      blizzard.realms(region, edition),
+      new Promise(resolve => { timer = setTimeout(() => resolve([]), 2200); }),
+    ]);
+    const query = interaction.options.getFocused().trim().toLowerCase();
+    const matches = options.filter(realm => realm.name.toLowerCase().includes(query) || realm.slug.includes(query));
+    return interaction.respond(matches.slice(0, 25).map(realm => ({ name: realm.name.slice(0, 100), value: realm.slug })));
+  } catch (error) {
+    console.error('Armory realm suggestions failed:', error.message);
+    return interaction.respond([]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function handleArmory(interaction) {
-  if (!config.blizzard?.clientId || !config.blizzard?.clientSecret) {
+  if (!hasBlizzardCredentials()) {
     return privateReply(interaction, 'Armory lookup requires Blizzard API credentials in config.js.');
   }
   const region = interaction.options.getString('region', true);
-  const realm = interaction.options.getString('realm', true).trim().normalize('NFC')
+  const edition = interaction.options.getSubcommand();
+  const forever = edition === 'forever';
+  const realm = forever ? null : interaction.options.getString('realm', true).trim().normalize('NFC')
     .toLowerCase().replace(/['’]/g, '').replace(/\s+/g, '-');
   const name = interaction.options.getString('character', true).trim().normalize('NFC').toLowerCase();
-  if (!Object.hasOwn(armoryRegions, region) || !/^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u.test(realm) ||
-      !/^\p{L}[\p{L}\p{M}]*$/u.test(name)) {
-    return privateReply(interaction, 'Enter a valid region, realm name or slug, and character name.');
+  const surname = forever ? interaction.options.getString('surname', true).trim().normalize('NFC').toLowerCase() : null;
+  const namePattern = /^\p{L}[\p{L}\p{M}]*$/u;
+  if (!Object.hasOwn(armoryRegions, region) || !Object.hasOwn(armoryEditions, edition) ||
+      !namePattern.test(name) || (forever && !namePattern.test(surname)) ||
+      (!forever && !/^[\p{L}\p{M}\p{N}]+(?:-[\p{L}\p{M}\p{N}]+)*$/u.test(realm))) {
+    return privateReply(interaction, 'Enter a valid character name and select the matching region and realm where applicable.');
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   let profile;
   try {
-    profile = await blizzard.character(region, realm, name);
+    if (!forever && !(await blizzard.realms(region, edition)).some(entry => entry.slug === realm)) {
+      return interaction.editReply('That realm is unavailable for this edition and region. Select a realm from the matching list.');
+    }
+    profile = await blizzard.character(region, edition, realm, forever ? name + '-' + surname : name);
   } catch (error) {
     console.error('Armory lookup failed:', error.message);
-    return interaction.editReply('Blizzard’s character API is unavailable right now. Try again later.');
+    return interaction.editReply('Blizzard’s character data is unavailable right now. Try again later.');
   }
   if (!profile) {
-    return interaction.editReply('No public Retail profile was found. Check the region, realm slug, and spelling.');
+    return interaction.editReply(forever
+      ? 'No Forever profile was found. Check the region and both names.'
+      : 'No public profile was found for that character. Check the edition, region, realm, and spelling.');
   }
 
   const locales = { us: 'en-us', eu: 'en-gb', kr: 'ko-kr', tw: 'zh-tw' };
-  const armory = 'https://worldofwarcraft.blizzard.com/' + locales[region] + '/character/' +
-    [region, profile.realm?.slug || realm, name].map(encodeURIComponent).join('/');
+  const armory = edition === 'retail' ? 'https://worldofwarcraft.blizzard.com/' + locales[region] + '/character/' +
+    [region, profile.realm?.slug || realm, name].map(encodeURIComponent).join('/') : undefined;
   const fields = [
     ['Level', profile.level],
     ['Class', profile.character_class?.name],
@@ -194,15 +240,15 @@ async function handleArmory(interaction) {
     .map(([name, value]) => ({ name, value: escapeMarkdown(String(value)).slice(0, 1024), inline: true }));
   return interaction.editReply({
     embeds: [{
-      title: escapeMarkdown(profile.name).slice(0, 256),
-      description: escapeMarkdown(profile.realm?.name || realm) + ' · ' + armoryRegions[region] + ' · Retail',
+      title: escapeMarkdown([profile.name, forever ? profile.surname || surname : null].filter(Boolean).join(' ')).slice(0, 256),
+      description: [profile.realm?.name || realm, armoryRegions[region], armoryEditions[edition]].filter(Boolean).map(value => escapeMarkdown(value)).join(' · '),
       color: 0xba8d35,
       url: armory,
       fields,
     }],
-    components: [new ActionRowBuilder().addComponents(
+    components: armory ? [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open Blizzard Armory').setURL(armory),
-    )],
+    )] : [],
   });
 }
 
@@ -480,7 +526,9 @@ client.once(Events.ClientReady, async ready => {
 client.on(Events.InteractionCreate, async interaction => {
   if (interaction.guildId !== config.guildId) return;
   try {
-    if (interaction.isButton() && interaction.customId.startsWith('raid:')) {
+    if (interaction.isAutocomplete() && interaction.commandName === 'armory') {
+      await suggestArmoryRealms(interaction);
+    } else if (interaction.isButton() && interaction.customId.startsWith('raid:')) {
       await handleSignup(interaction);
     } else if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'armory') {

@@ -58,6 +58,12 @@ Choose Retail, Classic, or Forever in the required `edition` field, then enter a
 
 ## Blizzard Armory lookup
 
-Use `/armory region:North America realm:Area 52 character:YourCharacter` to view a public Retail profile in Discord. The response includes the character's guild, level, class, and equipped item level when Blizzard provides them, plus a link to the Armory. If the realm name does not resolve, use the realm slug from its Armory URL.
+Choose the edition after `/armory`.
 
-Add `blizzard.clientId` and `blizzard.clientSecret` in `config.js` and restart the bot. You can leave `blizzard.realms` empty if you only want character lookup.
+- `/armory retail region:North America realm:Area 52 character:YourCharacter`
+- `/armory classic` or `/armory era` for Classic or Classic Era.
+- `/armory forever region:North America character:FirstName surname:LastName`. Forever uses full names within each region.
+
+For Retail, Classic, and Classic Era, select the region first, then type in the realm field to filter Blizzard's realm list for that edition. If suggestions are slow on the first request, type another letter to refresh after the list loads. Blizzard's profile data populates the Discord embed. Retail profiles also include a link to the Blizzard Armory.
+
+Add `blizzard.clientId` and `blizzard.clientSecret` in `config.js` and restart the bot. Leave `blizzard.realms` empty if you only want character lookup.

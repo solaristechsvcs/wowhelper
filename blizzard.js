@@ -1,7 +1,18 @@
 import { randomBytes } from 'node:crypto';
 
 const regions = ['us', 'eu', 'kr', 'tw'];
-const editions = { retail: 'dynamic', classic: 'dynamic-classic', era: 'dynamic-classic1x' };
+const editions = { retail: '', classic: '-classic', era: '-classic1x', forever: '-forever' };
+const locales = { us: 'en_US', eu: 'en_GB', kr: 'ko_KR', tw: 'zh_TW' };
+
+function regionalUrl(region, edition, kind, path) {
+  if (!regions.includes(region) || !Object.hasOwn(editions, edition)) {
+    throw new Error('Unsupported Blizzard region or edition.');
+  }
+  const url = new URL(path, 'https://' + region + '.api.blizzard.com');
+  url.searchParams.set('namespace', kind + editions[edition] + '-' + region);
+  url.searchParams.set('locale', locales[region]);
+  return url;
+}
 
 export function realmKey(realm) {
   return [realm.region, realm.edition, realm.id].join(':');
@@ -12,7 +23,7 @@ export function validateBlizzard(config) {
   if (!config.clientId || !config.clientSecret) throw new Error('Set Blizzard API credentials in config.js.');
   const seen = new Set();
   for (const realm of config.realms) {
-    if (!regions.includes(realm.region) || !Object.hasOwn(editions, realm.edition) ||
+    if (!regions.includes(realm.region) || !['retail', 'classic', 'era'].includes(realm.edition) ||
         !Number.isSafeInteger(realm.id) || realm.id < 1 ||
         typeof realm.label !== 'string' || !realm.label.trim() || realm.label.length > 100) {
       throw new Error('Each Blizzard realm needs a valid region, edition, connected-realm ID, and label.');
@@ -59,8 +70,7 @@ export function blizzardClient(config, request = fetch, clock = Date.now) {
   }
 
   async function status(realm) {
-    const url = new URL('/data/wow/connected-realm/' + realm.id, 'https://' + realm.region + '.api.blizzard.com');
-    url.searchParams.set('namespace', editions[realm.edition] + '-' + realm.region);
+    const url = regionalUrl(realm.region, realm.edition, 'dynamic', '/data/wow/connected-realm/' + realm.id);
     const response = await authorized(url);
     if (!response.ok) throw new Error('Blizzard realm API returned HTTP ' + response.status);
     const status = (await response.json()).status?.type;
@@ -68,13 +78,35 @@ export function blizzardClient(config, request = fetch, clock = Date.now) {
     return status;
   }
 
-  async function character(region, realm, name) {
-    if (!regions.includes(region)) throw new Error('Unsupported Blizzard region.');
-    const path = '/profile/wow/character/' + encodeURIComponent(realm) + '/' + encodeURIComponent(name);
-    const url = new URL(path, 'https://' + region + '.api.blizzard.com');
-    url.searchParams.set('namespace', 'profile-' + region);
-    url.searchParams.set('locale', { us: 'en_US', eu: 'en_GB', kr: 'ko_KR', tw: 'zh_TW' }[region]);
-    const response = await authorized(url);
+  const realmCache = new Map();
+  async function realms(region, edition) {
+    if (edition === 'forever') return [];
+    const url = regionalUrl(region, edition, 'dynamic', '/data/wow/realm/index');
+    const key = url.href;
+    const cached = realmCache.get(key);
+    if (cached && cached.expires > clock()) return cached.promise;
+    const promise = (async () => {
+      const response = await authorized(url);
+      if (!response.ok) throw new Error('Blizzard realm index returned HTTP ' + response.status);
+      const data = await response.json();
+      if (!Array.isArray(data.realms)) throw new Error('Unexpected Blizzard realm index.');
+      return data.realms.filter(realm => typeof realm.name === 'string' && typeof realm.slug === 'string' &&
+        realm.name.length > 0 && realm.slug.length > 0 && realm.slug.length <= 100)
+        .sort((first, second) => first.name.localeCompare(second.name));
+    })();
+    realmCache.set(key, { promise, expires: clock() + 60 * 60_000 });
+    try {
+      return await promise;
+    } catch (error) {
+      if (realmCache.get(key)?.promise === promise) realmCache.delete(key);
+      throw error;
+    }
+  }
+
+  async function character(region, edition, realm, name) {
+    const segments = edition === 'forever' ? [name] : [realm, name];
+    const path = '/profile/wow/character/' + segments.map(encodeURIComponent).join('/');
+    const response = await authorized(regionalUrl(region, edition, 'profile', path));
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Blizzard character API returned HTTP ' + response.status);
     const profile = await response.json();
@@ -82,7 +114,7 @@ export function blizzardClient(config, request = fetch, clock = Date.now) {
     return profile;
   }
 
-  return { status, character };
+  return { status, realms, character };
 }
 
 export function observeRealm(data, realm, status, now) {

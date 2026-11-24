@@ -51,3 +51,7 @@ WoWHelper posts the scheduled announcement immediately, then posts start and end
 3. Set `maintenanceChannelId` and restart. Check `/maintenance status` for each realm's last successful reading.
 
 The bot polls Blizzard every two minutes and posts when a realm changes from online to offline or back. The first successful reading establishes a baseline. Failed API calls preserve the last valid result. Realm status reports availability, and scheduled announcements still use the times entered with `/maintenance schedule`.
+
+## Wowhead search
+
+Use `/wowhead query:Thunderfury` to get a private button that opens matching results on Wowhead. Retail is the default. Select `edition:Classic` to search the Classic database. Use item, quest, NPC, spell, or guide names as keywords.

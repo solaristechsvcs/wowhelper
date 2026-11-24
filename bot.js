@@ -33,7 +33,19 @@ const stamp = (at, format = 'F') => '<t:' + Math.floor(at / 1000) + ':' + format
 const opt = (command, name, description, max = 100) => command.addStringOption(
   option => option.setName(name).setDescription(description).setRequired(true).setMaxLength(max),
 );
+const wowheadEditions = {
+  retail: { name: 'Retail', path: '/search' },
+  classic: { name: 'Classic', path: '/classic/search' },
+};
+const wowheadCommand = new SlashCommandBuilder().setName('wowhead')
+  .setDescription('Search Wowhead for items, quests, spells, and more');
+opt(wowheadCommand, 'query', 'What to look up');
+wowheadCommand.addStringOption(option => option.setName('edition')
+  .setDescription('Choose a Wowhead database. Defaults to Retail.')
+  .addChoices(Object.entries(wowheadEditions).map(([value, edition]) => ({ name: edition.name, value }))));
+
 const commands = [
+  wowheadCommand,
   new SlashCommandBuilder().setName('raid').setDescription('Plan and sign up for guild raids')
     .addSubcommand(command => {
       command.setName('create').setDescription('Post a raid signup in this channel');
@@ -60,6 +72,20 @@ const officer = interaction =>
   Boolean(config.officerRoleId && interaction.member?.roles.cache.has(config.officerRoleId));
 
 const privateReply = (interaction, content) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+
+function handleWowhead(interaction) {
+  const query = interaction.options.getString('query', true).trim();
+  if (!query) return privateReply(interaction, 'Enter an item, quest, spell, or other search term.');
+
+  const edition = wowheadEditions[interaction.options.getString('edition') ?? 'retail'];
+  const url = new URL(edition.path, 'https://www.wowhead.com');
+  url.searchParams.set('q', query);
+  return interaction.reply({
+    components: [new ActionRowBuilder().addComponents(new ButtonBuilder()
+      .setStyle(ButtonStyle.Link).setLabel('Search Wowhead (' + edition.name + ')').setURL(url.href))],
+    flags: MessageFlags.Ephemeral,
+  });
+}
 
 function raidCard(raid) {
   const closed = raid.closed || Date.now() >= raid.start;
@@ -338,7 +364,11 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isButton() && interaction.customId.startsWith('raid:')) {
       await handleSignup(interaction);
     } else if (interaction.isChatInputCommand()) {
-      const action = interaction.options.getSubcommand();
+      if (interaction.commandName === 'wowhead') {
+        await handleWowhead(interaction);
+        return;
+      }
+      const action = interaction.options.getSubcommand(false);
       if (interaction.commandName === 'raid') await handleRaid(interaction, action);
       if (interaction.commandName === 'maintenance') await handleMaintenance(interaction, action);
     }

@@ -67,3 +67,5 @@ Choose the edition after `/armory`.
 For Retail, Classic, and Classic Era, select the region first, then type in the realm field to filter Blizzard's realm list for that edition. If suggestions are slow on the first request, type another letter to refresh after the list loads. Blizzard's profile data populates the Discord embed. Retail profiles also include a link to the Blizzard Armory.
 
 Add `blizzard.clientId` and `blizzard.clientSecret` in `config.js` and restart the bot. Leave `blizzard.realms` empty if you only want character lookup.
+
+If the realm picker is empty, run `/armory realms` with the same edition and region. It reports what Blizzard returns and warms the realm cache for that selection. If Discord shows a loading suggestion, type another letter after a moment.

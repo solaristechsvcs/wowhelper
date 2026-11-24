@@ -65,6 +65,13 @@ for (const [edition, label] of Object.entries(armoryEditions)) {
   });
 }
 
+armoryCommand.addSubcommand(command => command.setName('realms')
+  .setDescription('Check whether Blizzard is returning realms for an edition and region')
+  .addStringOption(option => option.setName('edition').setDescription('Game edition').setRequired(true)
+    .addChoices(Object.entries(armoryEditions).map(([value, name]) => ({ name, value }))))
+  .addStringOption(option => option.setName('region').setDescription('Character region').setRequired(true)
+    .addChoices(Object.entries(armoryRegions).map(([value, name]) => ({ name, value })))));
+
 const commands = [
   armoryCommand,
   wowheadCommand,
@@ -166,30 +173,56 @@ async function handleWowhead(interaction) {
 
 const hasBlizzardCredentials = () => Boolean(config.blizzard?.clientId && config.blizzard?.clientSecret);
 
+const realmHint = '__wowhelper_realm_hint__';
+
 async function suggestArmoryRealms(interaction) {
+  const hint = name => interaction.respond([{ name, value: realmHint }]);
   const region = interaction.options.getString('region');
   const edition = interaction.options.getSubcommand();
-  if (!hasBlizzardCredentials() || !Object.hasOwn(armoryRegions, region) ||
-      !Object.hasOwn(armoryEditions, edition) || edition === 'forever') return interaction.respond([]);
+  if (!hasBlizzardCredentials()) return hint('Blizzard API credentials are required in config.js');
+  if (!Object.hasOwn(armoryRegions, region)) return hint('Select a region first');
+  if (!Object.hasOwn(armoryEditions, edition) || edition === 'forever') return interaction.respond([]);
 
   let timer;
   try {
     const options = await Promise.race([
       blizzard.realms(region, edition),
-      new Promise(resolve => { timer = setTimeout(() => resolve([]), 2200); }),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 1400); }),
     ]);
+    if (!options) return hint('Loading Blizzard realms. Type another letter to refresh.');
     const query = interaction.options.getFocused().trim().toLowerCase();
-    const matches = options.filter(realm => realm.name.toLowerCase().includes(query) || realm.slug.includes(query));
+    const matches = options.filter(realm => realm.name.toLowerCase().includes(query) || realm.slug.toLowerCase().includes(query));
+    if (!matches.length) return hint(query ? 'No matching realms. Try a shorter search.' : 'Blizzard returned an empty realm list');
     return interaction.respond(matches.slice(0, 25).map(realm => ({ name: realm.name.slice(0, 100), value: realm.slug })));
   } catch (error) {
     console.error('Armory realm suggestions failed:', error.message);
-    return interaction.respond([]);
+    return hint('Realm list unavailable. Run /armory realms for details.');
   } finally {
     clearTimeout(timer);
   }
 }
 
+async function checkArmoryRealms(interaction) {
+  if (!hasBlizzardCredentials()) {
+    return privateReply(interaction, 'Set blizzard.clientId and blizzard.clientSecret in config.js and restart WoWHelper.');
+  }
+  const region = interaction.options.getString('region', true);
+  const edition = interaction.options.getString('edition', true);
+  if (edition === 'forever') return privateReply(interaction, 'Forever uses first name and surname instead of a realm.');
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    const entries = await blizzard.realms(region, edition);
+    const names = entries.slice(0, 10).map(realm => escapeMarkdown(realm.name.slice(0, 100))).join(', ');
+    return interaction.editReply(armoryEditions[edition] + ' · ' + armoryRegions[region] +
+      ' · Blizzard returned ' + entries.length + ' realms.' + (names ? '\n' + names : ''));
+  } catch (error) {
+    console.error('Armory realm check failed:', error.message);
+    return interaction.editReply('Could not load realms. ' + error.message);
+  }
+}
+
 async function handleArmory(interaction) {
+  if (interaction.options.getSubcommand() === 'realms') return checkArmoryRealms(interaction);
   if (!hasBlizzardCredentials()) {
     return privateReply(interaction, 'Armory lookup requires Blizzard API credentials in config.js.');
   }
@@ -198,6 +231,9 @@ async function handleArmory(interaction) {
   const forever = edition === 'forever';
   const realm = forever ? null : interaction.options.getString('realm', true).trim().normalize('NFC')
     .toLowerCase().replace(/['’]/g, '').replace(/\s+/g, '-');
+  if (realm === realmHint) {
+    return privateReply(interaction, 'Select a realm from the list. Run /armory realms if the list is unavailable.');
+  }
   const name = interaction.options.getString('character', true).trim().normalize('NFC').toLowerCase();
   const surname = forever ? interaction.options.getString('surname', true).trim().normalize('NFC').toLowerCase() : null;
   const namePattern = /^\p{L}[\p{L}\p{M}]*$/u;

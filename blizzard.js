@@ -90,9 +90,15 @@ export function blizzardClient(config, request = fetch, clock = Date.now) {
       if (!response.ok) throw new Error('Blizzard realm index returned HTTP ' + response.status);
       const data = await response.json();
       if (!Array.isArray(data.realms)) throw new Error('Unexpected Blizzard realm index.');
-      return data.realms.filter(realm => typeof realm.name === 'string' && typeof realm.slug === 'string' &&
-        realm.name.length > 0 && realm.slug.length > 0 && realm.slug.length <= 100)
-        .sort((first, second) => first.name.localeCompare(second.name));
+      const entries = data.realms.flatMap(realm => {
+        if (!realm || typeof realm.slug !== 'string' || !realm.slug || realm.slug.length > 100) return [];
+        const localized = realm.name;
+        const name = typeof localized === 'string' ? localized :
+          localized?.[locales[region]] || localized?.en_US || localized?.en_GB || realm.slug;
+        return [{ slug: realm.slug, name: typeof name === 'string' && name ? name : realm.slug }];
+      });
+      if (!entries.length) throw new Error('Blizzard returned no usable realms for ' + edition + ' in ' + region + '.');
+      return entries.sort((first, second) => first.name.localeCompare(second.name));
     })();
     realmCache.set(key, { promise, expires: clock() + 60 * 60_000 });
     try {

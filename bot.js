@@ -46,7 +46,16 @@ wowheadCommand.addStringOption(option => option.setName('edition')
   .addChoices(Object.entries(wowheadEditions).map(([value, edition]) => ({ name: edition.name, value }))));
 opt(wowheadCommand, 'query', 'What to look up');
 
+const armoryRegions = { us: 'North America', eu: 'Europe', kr: 'Korea', tw: 'Taiwan' };
+const armoryCommand = new SlashCommandBuilder().setName('armory')
+  .setDescription('Look up a Retail WoW character on the Blizzard Armory')
+  .addStringOption(option => option.setName('region').setDescription('Character region').setRequired(true)
+    .addChoices(Object.entries(armoryRegions).map(([value, name]) => ({ name, value }))));
+opt(armoryCommand, 'realm', 'Realm name or Armory realm slug');
+opt(armoryCommand, 'character', 'Character name', 32);
+
 const commands = [
+  armoryCommand,
   wowheadCommand,
   new SlashCommandBuilder().setName('raid').setDescription('Plan and sign up for guild raids')
     .addSubcommand(command => {
@@ -142,6 +151,59 @@ async function handleWowhead(interaction) {
     void button.update(card()).catch(error => console.error('Wowhead page update failed:', error.message));
   });
   collector.on('end', () => { void interaction.editReply(card(true)).catch(() => {}); });
+}
+
+async function handleArmory(interaction) {
+  if (!config.blizzard?.clientId || !config.blizzard?.clientSecret) {
+    return privateReply(interaction, 'Armory lookup requires Blizzard API credentials in config.js.');
+  }
+  const region = interaction.options.getString('region', true);
+  const realm = interaction.options.getString('realm', true).trim().normalize('NFC')
+    .toLowerCase().replace(/['’]/g, '').replace(/\s+/g, '-');
+  const name = interaction.options.getString('character', true).trim().normalize('NFC').toLowerCase();
+  if (!Object.hasOwn(armoryRegions, region) || !/^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u.test(realm) ||
+      !/^\p{L}[\p{L}\p{M}]*$/u.test(name)) {
+    return privateReply(interaction, 'Enter a valid region, realm name or slug, and character name.');
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  let profile;
+  try {
+    profile = await blizzard.character(region, realm, name);
+  } catch (error) {
+    console.error('Armory lookup failed:', error.message);
+    return interaction.editReply('Blizzard’s character API is unavailable right now. Try again later.');
+  }
+  if (!profile) {
+    return interaction.editReply('No public Retail profile was found. Check the region, realm slug, and spelling.');
+  }
+
+  const locales = { us: 'en-us', eu: 'en-gb', kr: 'ko-kr', tw: 'zh-tw' };
+  const armory = 'https://worldofwarcraft.blizzard.com/' + locales[region] + '/character/' +
+    [region, profile.realm?.slug || realm, name].map(encodeURIComponent).join('/');
+  const fields = [
+    ['Level', profile.level],
+    ['Class', profile.character_class?.name],
+    ['Race', profile.race?.name],
+    ['Specialization', profile.active_spec?.name],
+    ['Faction', profile.faction?.name],
+    ['Guild', profile.guild?.name],
+    ['Equipped item level', profile.equipped_item_level],
+    ['Achievement points', profile.achievement_points],
+  ].filter(([, value]) => typeof value === 'string' && value.trim() || Number.isFinite(value))
+    .map(([name, value]) => ({ name, value: escapeMarkdown(String(value)).slice(0, 1024), inline: true }));
+  return interaction.editReply({
+    embeds: [{
+      title: escapeMarkdown(profile.name).slice(0, 256),
+      description: escapeMarkdown(profile.realm?.name || realm) + ' · ' + armoryRegions[region] + ' · Retail',
+      color: 0xba8d35,
+      url: armory,
+      fields,
+    }],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open Blizzard Armory').setURL(armory),
+    )],
+  });
 }
 
 function raidCard(raid) {
@@ -421,6 +483,10 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isButton() && interaction.customId.startsWith('raid:')) {
       await handleSignup(interaction);
     } else if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === 'armory') {
+        await handleArmory(interaction);
+        return;
+      }
       if (interaction.commandName === 'wowhead') {
         await handleWowhead(interaction);
         return;

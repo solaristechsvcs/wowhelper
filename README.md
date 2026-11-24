@@ -55,3 +55,9 @@ The bot polls Blizzard every two minutes and posts when a realm changes from onl
 ## Wowhead search
 
 Choose Retail, Classic, or Forever in the required `edition` field, then enter a search term in `query`. For example, `/wowhead edition:Forever query:Thunderfury` shows a private Discord embed with direct links and result types. Results are displayed five at a time with Previous and Next controls when more pages are available. The Wowhead button opens the full search and is also available if in-Discord results cannot be loaded. Use item, quest, NPC, spell, or guide names as keywords.
+
+## Blizzard Armory lookup
+
+Use `/armory region:North America realm:Area 52 character:YourCharacter` to view a public Retail profile in Discord. The response includes the character's guild, level, class, and equipped item level when Blizzard provides them, plus a link to the Armory. If the realm name does not resolve, use the realm slug from its Armory URL.
+
+Add `blizzard.clientId` and `blizzard.clientSecret` in `config.js` and restart the bot. You can leave `blizzard.realms` empty if you only want character lookup.

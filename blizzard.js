@@ -46,24 +46,43 @@ export function blizzardClient(config, request = fetch, clock = Date.now) {
     return token;
   }
 
-  async function query(realm, retry) {
-    const url = new URL('/data/wow/connected-realm/' + realm.id, 'https://' + realm.region + '.api.blizzard.com');
-    url.searchParams.set('namespace', editions[realm.edition] + '-' + realm.region);
+  async function authorized(url, retry = true) {
     const response = await request(url, {
       headers: { Authorization: 'Bearer ' + await getToken() },
       signal: AbortSignal.timeout(10_000),
     });
     if (response.status === 401 && retry) {
       expiresAt = 0;
-      return query(realm, false);
+      return authorized(url, false);
     }
+    return response;
+  }
+
+  async function status(realm) {
+    const url = new URL('/data/wow/connected-realm/' + realm.id, 'https://' + realm.region + '.api.blizzard.com');
+    url.searchParams.set('namespace', editions[realm.edition] + '-' + realm.region);
+    const response = await authorized(url);
     if (!response.ok) throw new Error('Blizzard realm API returned HTTP ' + response.status);
     const status = (await response.json()).status?.type;
     if (status !== 'UP' && status !== 'DOWN') throw new Error('Unknown Blizzard realm status.');
     return status;
   }
 
-  return { status: realm => query(realm, true) };
+  async function character(region, realm, name) {
+    if (!regions.includes(region)) throw new Error('Unsupported Blizzard region.');
+    const path = '/profile/wow/character/' + encodeURIComponent(realm) + '/' + encodeURIComponent(name);
+    const url = new URL(path, 'https://' + region + '.api.blizzard.com');
+    url.searchParams.set('namespace', 'profile-' + region);
+    url.searchParams.set('locale', { us: 'en_US', eu: 'en_GB', kr: 'ko_KR', tw: 'zh_TW' }[region]);
+    const response = await authorized(url);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error('Blizzard character API returned HTTP ' + response.status);
+    const profile = await response.json();
+    if (typeof profile.name !== 'string') throw new Error('Unexpected Blizzard character profile.');
+    return profile;
+  }
+
+  return { status, character };
 }
 
 export function observeRealm(data, realm, status, now) {

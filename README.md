@@ -54,4 +54,4 @@ The bot polls Blizzard every two minutes and posts when a realm changes from onl
 
 ## Wowhead search
 
-Choose Retail, Classic, or Forever in the required `edition` field, then enter a search term in `query`. For example, `/wowhead edition:Forever query:Thunderfury` returns a private button that opens the Forever search results on Wowhead. Use item, quest, NPC, spell, or guide names as keywords.
+Choose Retail, Classic, or Forever in the required `edition` field, then enter a search term in `query`. For example, `/wowhead edition:Forever query:Thunderfury` shows a private Discord embed with direct links and result types. Results are displayed five at a time with Previous and Next controls when more pages are available. The Wowhead button opens the full search and is also available if in-Discord results cannot be loaded. Use item, quest, NPC, spell, or guide names as keywords.

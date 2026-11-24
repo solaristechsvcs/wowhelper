@@ -1,7 +1,8 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Events, GatewayIntentBits,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, ComponentType, Events, GatewayIntentBits,
   MessageFlags, PermissionFlagsBits, SlashCommandBuilder, escapeMarkdown,
 } from 'discord.js';
+import { searchWowhead } from './wowhead.js';
 import { pathToFileURL } from 'node:url';
 import { blizzardClient, observeRealm, realmKey, validateBlizzard } from './blizzard.js';
 import { advanceMaintenance, openState, parseTime, transition } from './state.js';
@@ -74,7 +75,7 @@ const officer = interaction =>
 
 const privateReply = (interaction, content) => interaction.reply({ content, flags: MessageFlags.Ephemeral });
 
-function handleWowhead(interaction) {
+async function handleWowhead(interaction) {
   const query = interaction.options.getString('query', true).trim();
   if (!query) return privateReply(interaction, 'Enter an item, quest, spell, or other search term.');
 
@@ -85,11 +86,62 @@ function handleWowhead(interaction) {
   const edition = wowheadEditions[editionKey];
   const url = new URL(edition.path, 'https://www.wowhead.com');
   url.searchParams.set('q', query);
-  return interaction.reply({
-    components: [new ActionRowBuilder().addComponents(new ButtonBuilder()
-      .setStyle(ButtonStyle.Link).setLabel('Search Wowhead (' + edition.name + ')').setURL(url.href))],
-    flags: MessageFlags.Ephemeral,
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const site = new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Wowhead').setURL(url.href);
+  let results;
+  try {
+    results = await searchWowhead(url, query);
+  } catch (error) {
+    console.error('Wowhead search failed:', error.message);
+    return interaction.editReply({
+      content: 'Wowhead results are temporarily unavailable in Discord. Open the search on Wowhead below.',
+      components: [new ActionRowBuilder().addComponents(site)],
+    });
+  }
+
+  const size = 5;
+  const pages = Math.max(1, Math.ceil(results.length / size));
+  let page = 0;
+  function card(expired = false) {
+    const first = page * size;
+    const description = results.slice(first, first + size).map((result, index) =>
+      '**' + (first + index + 1) + '. [' + escapeMarkdown(result.title) + '](' + result.url + ')**\n' + result.type,
+    ).join('\n\n');
+    const row = new ActionRowBuilder();
+    if (pages > 1) {
+      row.addComponents(
+        new ButtonBuilder().setCustomId('wowhead:prev').setLabel('Previous')
+          .setStyle(ButtonStyle.Secondary).setDisabled(expired || page === 0),
+        new ButtonBuilder().setCustomId('wowhead:next').setLabel('Next')
+          .setStyle(ButtonStyle.Primary).setDisabled(expired || page === pages - 1),
+      );
+    }
+    return {
+      embeds: [{
+        title: 'Wowhead ' + edition.name + ' results',
+        url: url.href,
+        color: 0xba8d35,
+        description: description || 'No results could be displayed. Use the Wowhead button to check the full search.',
+        footer: { text: query + ' · ' + results.length + ' shown in Discord · Page ' + (page + 1) + '/' + pages },
+      }],
+      components: [row.addComponents(site)],
+    };
+  }
+
+  const message = await interaction.editReply(card());
+  if (pages === 1) return;
+  const collector = message.createMessageComponentCollector({
+    componentType: ComponentType.Button,
+    time: 120_000,
+    filter: button => button.user.id === interaction.user.id &&
+      ['wowhead:prev', 'wowhead:next'].includes(button.customId),
   });
+  collector.on('collect', button => {
+    page = button.customId === 'wowhead:next' ? Math.min(pages - 1, page + 1) : Math.max(0, page - 1);
+    void button.update(card()).catch(error => console.error('Wowhead page update failed:', error.message));
+  });
+  collector.on('end', () => { void interaction.editReply(card(true)).catch(() => {}); });
 }
 
 function raidCard(raid) {

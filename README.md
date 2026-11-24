@@ -17,7 +17,15 @@ Use a Node.js 22.12+ or 24 egg. Put the repository files and your `config.js` in
 npm install --omit=dev && npm start
 ```
 
-If the egg installs dependencies independently, set its entry file to `bot.js`. Run one bot instance and keep `data/wowhelper.json` in persistent storage. This file stores signup responses, maintenance windows, and pending announcements across restarts. Each startup synchronizes the application's guild commands, so use a dedicated bot application.
+If the egg installs dependencies independently, set its entry file to `scripts/start.js`. The updater needs Git, npm, and outbound access to GitHub and the npm registry. Run one bot instance and keep `data/wowhelper.json` in persistent storage. This file stores signup responses, maintenance windows, and pending announcements across restarts. Each startup synchronizes the application's guild commands, so use a dedicated bot application.
+
+### Automatic updates
+
+The updater checks the public WoWHelper repository's `main` branch every five minutes by default. It stages new code and installs its dependencies in `.wowhelper-updates/` before restarting the bot. A release becomes active after Discord login and command registration succeed. If startup fails, the updater restarts the previous release.
+
+Keep `config.js` and the data file in the Wisp server root. Relative `dataFile` paths are resolved from that root under the updater. For an existing deployment, install this version once and change the Wisp entry point from `bot.js` to `scripts/start.js` or use the command above.
+
+Set `updater.enabled` to `false` to stop polling and continue using the last active release. Use `npm run start:direct` to run the installed server-root version without the updater.
 
 ## Raid commands
 

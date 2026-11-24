@@ -2,9 +2,14 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Events, GatewayIntentBits,
   MessageFlags, PermissionFlagsBits, SlashCommandBuilder, escapeMarkdown,
 } from 'discord.js';
-import config from './config.js';
+import { pathToFileURL } from 'node:url';
 import { blizzardClient, observeRealm, realmKey, validateBlizzard } from './blizzard.js';
 import { advanceMaintenance, openState, parseTime, transition } from './state.js';
+
+const configUrl = process.env.WOWHELPER_CONFIG_PATH
+  ? pathToFileURL(process.env.WOWHELPER_CONFIG_PATH)
+  : new URL('./config.js', import.meta.url);
+const { default: config } = await import(configUrl.href);
 
 const isId = value => /^\d{17,20}$/.test(value);
 if (!config.token || config.token === 'YOUR_DISCORD_BOT_TOKEN' || !isId(config.guildId)) {
@@ -313,6 +318,7 @@ client.once(Events.ClientReady, async ready => {
   try {
     await ready.application.commands.set(commands.map(command => command.toJSON()), config.guildId);
     console.log('WoWHelper online as ' + ready.user.tag);
+    if (process.connected) process.send({ type: 'ready' });
     void sendMaintenanceNotices();
     setInterval(sendMaintenanceNotices, 15_000);
     if (watchedRealms.length) {

@@ -7,8 +7,9 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "start": "node bot.js",
-    "check": "node --check bot.js && node --check state.js && node --check blizzard.js"
+    "start": "node scripts/start.js",
+    "check": "node --check bot.js && node --check state.js && node --check blizzard.js && node --check scripts/start.js && node --check scripts/updater.js",
+    "start:direct": "node bot.js"
   },
   "dependencies": {
     "discord.js": "14.22.1"

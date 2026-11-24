@@ -10,5 +10,12 @@ export default {
       // { region: 'us', edition: 'retail', id: 0, label: 'My realm group' },
     ],
   },
+  updater: {
+    enabled: true,
+    repository: 'https://github.com/solaristechsvcs/wowhelper.git',
+    branch: 'main',
+    intervalSeconds: 300,
+    startupTimeoutSeconds: 60,
+  },
   dataFile: './data/wowhelper.json',
 };

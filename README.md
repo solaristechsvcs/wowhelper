@@ -54,4 +54,4 @@ The bot polls Blizzard every two minutes and posts when a realm changes from onl
 
 ## Wowhead search
 
-Use `/wowhead query:Thunderfury` to get a private button that opens matching results on Wowhead. Retail is the default. Select `edition:Classic` to search the Classic database. Use item, quest, NPC, spell, or guide names as keywords.
+Choose Retail, Classic, or Forever in the required `edition` field, then enter a search term in `query`. For example, `/wowhead edition:Forever query:Thunderfury` returns a private button that opens the Forever search results on Wowhead. Use item, quest, NPC, spell, or guide names as keywords.

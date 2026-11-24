@@ -36,13 +36,14 @@ const opt = (command, name, description, max = 100) => command.addStringOption(
 const wowheadEditions = {
   retail: { name: 'Retail', path: '/search' },
   classic: { name: 'Classic', path: '/classic/search' },
+  forever: { name: 'Forever', path: '/forever/search' },
 };
 const wowheadCommand = new SlashCommandBuilder().setName('wowhead')
   .setDescription('Search Wowhead for items, quests, spells, and more');
-opt(wowheadCommand, 'query', 'What to look up');
 wowheadCommand.addStringOption(option => option.setName('edition')
-  .setDescription('Choose a Wowhead database. Defaults to Retail.')
+  .setDescription('Choose Retail, Classic, or Forever').setRequired(true)
   .addChoices(Object.entries(wowheadEditions).map(([value, edition]) => ({ name: edition.name, value }))));
+opt(wowheadCommand, 'query', 'What to look up');
 
 const commands = [
   wowheadCommand,
@@ -77,7 +78,11 @@ function handleWowhead(interaction) {
   const query = interaction.options.getString('query', true).trim();
   if (!query) return privateReply(interaction, 'Enter an item, quest, spell, or other search term.');
 
-  const edition = wowheadEditions[interaction.options.getString('edition') ?? 'retail'];
+  const editionKey = interaction.options.getString('edition');
+  if (!Object.hasOwn(wowheadEditions, editionKey)) {
+    return privateReply(interaction, 'Choose Retail, Classic, or Forever before searching.');
+  }
+  const edition = wowheadEditions[editionKey];
   const url = new URL(edition.path, 'https://www.wowhead.com');
   url.searchParams.set('q', query);
   return interaction.reply({

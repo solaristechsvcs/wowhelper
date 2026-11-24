@@ -3,6 +3,7 @@ import {
   MessageFlags, PermissionFlagsBits, SlashCommandBuilder, escapeMarkdown,
 } from 'discord.js';
 import config from './config.js';
+import { blizzardClient, observeRealm, realmKey, validateBlizzard } from './blizzard.js';
 import { advanceMaintenance, openState, parseTime, transition } from './state.js';
 
 const isId = value => /^\d{17,20}$/.test(value);
@@ -13,6 +14,12 @@ for (const key of ['officerRoleId', 'maintenanceChannelId']) {
   if (config[key] && !isId(config[key])) throw new Error('Invalid ' + key + ' in config.js.');
 }
 
+validateBlizzard(config.blizzard);
+const watchedRealms = config.blizzard?.realms ?? [];
+if (watchedRealms.length && !config.maintenanceChannelId) {
+  throw new Error('Set maintenanceChannelId to enable Blizzard realm monitoring.');
+}
+const blizzard = blizzardClient(config.blizzard);
 const db = openState(config.dataFile);
 const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: { parse: [] } });
 const roles = { tank: 'Tank', healer: 'Healer', dps: 'DPS', tentative: 'Tentative', absent: 'Absent' };
@@ -38,6 +45,7 @@ const commands = [
       opt(command, 'start', timeFormat);
       return opt(command, 'end', timeFormat);
     })
+    .addSubcommand(command => command.setName('status').setDescription('Show the latest checks from Blizzard'))
     .addSubcommand(command => opt(command.setName('start').setDescription('Confirm maintenance has started'), 'id', 'Maintenance ID'))
     .addSubcommand(command => opt(command.setName('end').setDescription('Confirm maintenance has ended'), 'id', 'Maintenance ID')),
 ];
@@ -191,6 +199,16 @@ async function sendMaintenanceNotices() {
     const channel = await maintenanceChannel();
     while (db.current.notices.length) {
       const notice = db.current.notices[0];
+      if (notice.kind === 'realm') {
+        await channel.send({
+          content: '**' + (notice.status === 'UP' ? 'Realm back online' : 'Realm went offline') +
+            '** · ' + escapeMarkdown(notice.label) + '\nBlizzard realm status · ' + stamp(notice.at),
+          nonce: notice.nonce,
+          enforceNonce: true,
+        });
+        db.update(data => { data.notices.shift(); });
+        continue;
+      }
       const window = db.current.maintenance[notice.id];
       const title = notice.status === 'scheduled' ? 'Maintenance scheduled'
         : 'Maintenance ' + notice.status + (notice.confirmed ? ' · officer confirmed' : ' · scheduled time');
@@ -212,7 +230,45 @@ async function sendMaintenanceNotices() {
   }
 }
 
+let polling = false;
+async function pollBlizzard() {
+  if (polling) return;
+  polling = true;
+  try {
+    for (const realm of watchedRealms) {
+      try {
+        const status = await blizzard.status(realm);
+        db.update(data => observeRealm(data, realm, status, Date.now()));
+      } catch (error) {
+        console.error('Blizzard check failed for ' + realmKey(realm) + ':', error.message);
+      }
+    }
+    void sendMaintenanceNotices();
+  } finally {
+    polling = false;
+  }
+}
+
 async function handleMaintenance(interaction, action) {
+  if (action === 'status') {
+    if (!watchedRealms.length) return privateReply(interaction, 'Blizzard realm monitoring is disabled.');
+    const lines = watchedRealms.map(realm => {
+      const result = db.current.realmStatus?.[realmKey(realm)];
+      return escapeMarkdown(realm.label) + ' · ' + (result
+        ? (result.status === 'UP' ? 'Online' : 'Offline') + ' · checked ' + stamp(result.checkedAt, 'R')
+        : 'Waiting for a successful check');
+    });
+    let page = '';
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    for (const line of lines) {
+      if (page.length + line.length > 1800) {
+        await interaction.followUp({ content: page, flags: MessageFlags.Ephemeral });
+        page = '';
+      }
+      page += line + '\n';
+    }
+    return interaction.editReply(page);
+  }
   if (!officer(interaction)) return privateReply(interaction, 'Only officers can manage maintenance alerts.');
   if (!config.maintenanceChannelId) return privateReply(interaction, 'Set maintenanceChannelId in config.js first.');
   const field = name => interaction.options.getString(name, true).trim();
@@ -259,6 +315,10 @@ client.once(Events.ClientReady, async ready => {
     console.log('WoWHelper online as ' + ready.user.tag);
     void sendMaintenanceNotices();
     setInterval(sendMaintenanceNotices, 15_000);
+    if (watchedRealms.length) {
+      void pollBlizzard();
+      setInterval(pollBlizzard, 120_000);
+    }
   } catch (error) {
     console.error('Command registration failed:', error.message);
     ready.destroy();

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node bot.js",
-    "check": "node --check bot.js && node --check state.js"
+    "check": "node --check bot.js && node --check state.js && node --check blizzard.js"
   },
   "dependencies": {
     "discord.js": "14.22.1"

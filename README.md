@@ -35,3 +35,11 @@ Each member can change their RSVP by pressing another button. Signups stop at ra
 Use `/maintenance schedule` with an edition and region such as `Retail NA`, plus a start and end time. Enter timestamps with explicit timezone offsets, such as `2027-01-12T10:00-05:00` or `2027-01-12T15:00Z`. Raid times use the same format.
 
 WoWHelper posts the scheduled announcement immediately, then posts start and end updates based on the supplied timestamps. It checks every 15 seconds while online and catches up on pending notices after a restart. Time-based announcements carry a scheduled-time label. An officer can use `/maintenance start` or `/maintenance end` with the posted ID to confirm actual status, including an early finish. Enter dates from the [Blizzard Support maintenance bulletin](https://us.support.blizzard.com/en/help/product/wow/2).
+
+### Automatic Blizzard realm status
+
+1. Create a client in the [Battle.net Developer Portal](https://develop.battle.net/access/clients). Add its client ID and secret to the `blizzard` block in your private `config.js`.
+2. Add each realm group to `blizzard.realms` with a label, region (`us`, `eu`, `kr`, or `tw`), edition (`retail`, `classic`, or `era`), and numeric **connected-realm ID**. To locate the ID, query `/data/wow/realm/{slug}` using an OAuth token and the edition's dynamic namespace. Read the ID in the returned `connected_realm.href`. Some Classic environments may differ in API coverage.
+3. Set `maintenanceChannelId` and restart. Check `/maintenance status` for each realm's last successful reading.
+
+The bot polls Blizzard every two minutes and posts when a realm changes from online to offline or back. The first successful reading establishes a baseline. Failed API calls preserve the last valid result. Realm status reports availability, and scheduled announcements still use the times entered with `/maintenance schedule`.
